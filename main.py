@@ -206,9 +206,27 @@ class NN:
         return connections
 
     @staticmethod
+    def shift_link(connections):
+        if len(connections) == 0:
+            return NN.add_link(connections)
+        random_connection_index = random_int(len(connections))
+        index, start, end, active, weight = connections[random_connection_index]
+        connections[random_connection_index] = (index, start, end, active, weight * random.random() * 4 - 2)
+        return connections
+
+    @staticmethod
+    def randomize(connections):
+        if len(connections) == 0:
+            return NN.add_link(connections)
+        random_connection_index = random_int(len(connections))
+        index, start, end, active, weight = connections[random_connection_index]
+        connections[random_connection_index] = (index, start, end, active, random.random() * 4 - 2)
+        return connections
+
+    @staticmethod
     def mutate(a):
-        possible_mutations = [NN.add_link, NN.split_link]
-        mutation_f = possible_mutations[random_int(2)]
+        possible_mutations = [NN.add_link, NN.split_link, NN.shift_link, NN.randomize]
+        mutation_f = possible_mutations[random_int(len(possible_mutations))]
         connections = [*a._connections]
         mutation_f(connections)
         return NN(connections)
@@ -259,21 +277,12 @@ class NN:
 
 
 class Player:
-    _x = 100
-    _y = 100
-
-    _vx = 0
-    _vy = 0
-
-    _acceleration = 0.2
-
-    _color = None
-
     _distance_travelled = 0
-
     _dead = False
 
     def __init__(self):
+        self._x = 1440 / 2
+        self._y = 900 / 2
         self._color = (random_int(256), random_int(256), random_int(256), 255)
 
     @property
@@ -283,14 +292,6 @@ class Player:
     @property
     def y(self):
         return self._y
-
-    @property
-    def vx(self):
-        return self._vx
-
-    @property
-    def vy(self):
-        return self._vy
 
     @property
     def score(self):
@@ -305,20 +306,19 @@ class Player:
             return
 
         up, left, down, right = self._last_inputs = self.get_inputs()
-
-        self._vx = self._vx + self._acceleration * ((1 if right else 0) - (1 if left else 0))
-        self._vy = self._vy + self._acceleration * ((1 if down else 0) - (1 if up else 0))
-
-        self._distance_travelled = self._distance_travelled + (self._vx ** 2 + self._vy ** 2) ** 0.5
-
-        self._x = self._x + self._vx
-        self._y = self._y + self._vy
+        new_x = self._x + (5 if right else 0) - (5 if left else 0)
+        new_y = self._y + (5 if down else 0) - (5 if up else 0)
+        self._distance_travelled = (
+            self._distance_travelled + ((new_x - self._x) ** 2 + (new_y - self._y) ** 2) ** 0.5
+        )
+        self._x = new_x
+        self._y = new_y
 
         if not Game.is_on_screen(self._x, self._y):
             self._dead = True
 
         # Die if located in an dead fixpoint.
-        if (up == down) and (left == right) and not self._vx and not self._vy:
+        if (up == down) and (left == right):
             self._dead = True
 
     def get_inputs(self):
@@ -357,8 +357,8 @@ class NNAI(Player):
         feed_dict = {
             self._input_var[0]: self.x / 1440,
             self._input_var[1]: self.y / 900,
-            self._input_var[2]: self.vx,
-            self._input_var[3]: self.vy,
+            self._input_var[2]: (1440 - self.x) / 1440,
+            self._input_var[3]: (900 - self.y) / 900,
         }
         result = self._tf_session.run(self._output_var, feed_dict=feed_dict)
         return [a > 0.5 for a in result]
@@ -367,6 +367,8 @@ class NNAI(Player):
 class Game:
     WIDTH = 1440
     HEIGHT = 900
+
+    graphics = True
 
     @staticmethod
     def is_in_rect(x, y, rx, ry, rw, rh):
@@ -405,8 +407,10 @@ class Game:
                     sys.exit()
                 elif event.unicode == "s":
                     self.running = False
+                elif event.unicode == "v":
+                    self.graphics = not self.graphics
 
-    def run(self, players, graphics=True):
+    def run(self, players):
         self.running = True
         clock = pygame.time.Clock()
         while self.running and not all(player._dead for player in players):
@@ -414,10 +418,10 @@ class Game:
             for player in players:
                 player.update()
 
-            if graphics:
+            if self.graphics:
                 self.screen.fill(self.black, self.full_rect)
                 lines = [
-                    (f"{player.__class__}: {player.score:.2f} {player._last_inputs}", player.color)
+                    (f"{player.score:.2f} {player._last_inputs}", player.color)
                     for player in players
                 ]
                 self.render_text(lines, (1000, 10))
@@ -467,20 +471,22 @@ if __name__ == "__main__":
             chunk_size = 25
             for chunk_index, chunk in enumerate(chunks(players, 25)):
                 print(f"Running chunk {chunk_index}/{len(players)/25:.0f}")
-                game.run(chunk, graphics=chunk_index == 0)
+                game.run(chunk)
 
             print("Sorting by score")
             players.sort(reverse=True, key=lambda a: a.score)
             players_nn = [player.nn_def for player in players]
             print("Selecting the fittest")
             thanos = 50
-            parents = players_nn[0:thanos]
-            children = []
+            players_nn = players_nn[0:thanos]
 
-            print("Breeding and mutating")
-            for a in range(num_players):
+            print("Breeding")
+            for a in range(int(num_players / 3)):
                 i1, i2 = random_int(thanos), random_int(thanos)
                 a_i, b_i = min(i1, i2), max(i1, i2)
-                children.append(NN.mutate(NN.breed(parents[a_i], parents[b_i])))
+                players_nn.append(NN.breed(players_nn[a_i], players_nn[b_i]))
 
-            players_nn = children
+            print("Mutating")
+            for a in range(int(num_players / 2)):
+                i = random_int(thanos)
+                players_nn.append(NN.mutate(players_nn[i]))
