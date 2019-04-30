@@ -5,22 +5,20 @@ import random
 
 import tensorflow as tf
 
-from neatnn.utils import randbool
-
 
 class Gene:
     """Represents a single connection in a neural network."""
+
     _next_gene_index = 0
 
     @staticmethod
-    @property
     def next_gene_index():
         index = Gene._next_gene_index
         Gene._next_gene_index = Gene._next_gene_index + 1
         return index
 
     def __init__(self, start, end, weight, active, index=None):
-        self.index = index if index else Gene.next_gene_index
+        self.index = index if index else Gene.next_gene_index()
         self.start = start
         self.end = end
         self.weight = weight
@@ -38,6 +36,7 @@ class Gene:
 
 class NN:
     """Represents a neural network built of `Gene`s."""
+
     _num_inputs = None
     _num_outputs = None
 

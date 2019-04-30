@@ -16,6 +16,10 @@ require_inside_venv:
 format:
 	venv/bin/black --line-length 100 --py36 --exclude "build/|buck-out/|dist/|_build/|\.eggs/|\*\*/\.eggs|\.git/|\.hg/|\.mypy_cache/|\.nox/|\.tox/|venv|\.venv/|\*\*/\venv|\*\*/\.venv" .
 
+.PHONY: test
+test:
+	venv/bin/pytest
+
 .PHONY: lint
 lint:
 	venv/bin/flake8
