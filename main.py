@@ -1,7 +1,9 @@
 import functools
+import math
 import random
 import sys
 
+import numpy as np
 import pygame
 import tensorflow as tf
 
@@ -114,175 +116,13 @@ def gradient_descent():
             print(f"{a}\t+ {b}\t= {sum_ab}\t?= {nn_out}")
 
 
-class NN:
-    # connections: [(Index, Start, End, Active, Weight)]
-    _connections = []
-
-    _num_in = None
-    _num_out = None
-
-    _next_node_index = None
-    _next_gene_index = None
-
-    @staticmethod
-    def prepare(num_in, num_out):
-        NN._num_in = num_in
-        NN._num_out = num_out
-
-        NN._next_node_index = num_in + num_out
-        NN._next_gene_index = 0
-
-    @staticmethod
-    def breed(a, b):
-        max_dominant_gene = max([index for index, _, _, _, _ in a._connections])
-
-        def find_gene(index, pool):
-            return next((x for x in pool if x[0] == index), None)
-
-        new_connections = []
-        for index in range(max_dominant_gene + 1):
-            gene_a = find_gene(index, a._connections)
-            gene_b = find_gene(index, b._connections)
-            if not gene_a and not gene_b:
-                continue
-
-            if not gene_a or not gene_b:
-                new_connections.append(gene_a or gene_b)
-            else:
-                new_connections.append(gene_a if random_bool() else gene_b)
-
-        return NN(connections=new_connections)
-
-    @staticmethod
-    def add_link(connections):
-        start_nodes = list(set([*[start for _, start, _, _, _ in connections], *range(NN._num_in)]))
-        end_nodes = list(
-            set(
-                [
-                    *[end for _, _, end, _, _ in connections],
-                    *[index + NN._num_in for index in range(NN._num_out)],
-                ]
-            )
-        )
-
-        gene_index = NN._next_gene_index
-        NN._next_gene_index = NN._next_gene_index + 1
-        weight = random.random() * 4 - 2
-
-        # Repeat until not cyclic.
-        def is_parent_of(a, b):
-            if a == b:
-                return True
-            return any([is_parent_of(end, b) for _, start, end, _, _ in connections if start == a])
-
-        start_node, end_node = 0, 0
-        while is_parent_of(end_node, start_node):
-            start_node = start_nodes[random_int(len(start_nodes))]
-            end_node = end_nodes[random_int(len(end_nodes))]
-
-        connections.append((gene_index, start_node, end_node, True, weight))
-
-    @staticmethod
-    def split_link(connections):
-        if len(connections) == 0:
-            return NN.add_link(connections)
-
-        random_connection_index = random_int(len(connections))
-        index, start, end, _, weight = connections[random_connection_index]
-        connections[random_connection_index] = (index, start, end, False, weight)
-
-        gene_index = NN._next_gene_index
-        NN._next_gene_index = NN._next_gene_index + 2
-
-        node_index = NN._next_node_index
-        NN._next_node_index = NN._next_node_index + 1
-
-        connections.extend(
-            [
-                (gene_index, start, node_index, True, 1.0),
-                (gene_index + 1, node_index, end, True, weight),
-            ]
-        )
-        return connections
-
-    @staticmethod
-    def shift_link(connections):
-        if len(connections) == 0:
-            return NN.add_link(connections)
-        random_connection_index = random_int(len(connections))
-        index, start, end, active, weight = connections[random_connection_index]
-        connections[random_connection_index] = (index, start, end, active, weight * random.random() * 4 - 2)
-        return connections
-
-    @staticmethod
-    def randomize(connections):
-        if len(connections) == 0:
-            return NN.add_link(connections)
-        random_connection_index = random_int(len(connections))
-        index, start, end, active, weight = connections[random_connection_index]
-        connections[random_connection_index] = (index, start, end, active, random.random() * 4 - 2)
-        return connections
-
-    @staticmethod
-    def mutate(a):
-        possible_mutations = [NN.add_link, NN.split_link, NN.shift_link, NN.randomize]
-        mutation_f = possible_mutations[random_int(len(possible_mutations))]
-        connections = [*a._connections]
-        mutation_f(connections)
-        return NN(connections)
-
-    def __init__(self, connections=None):
-        self._connections = connections or []
-
-    def to_tensorflow_network(self):
-        nodes = {}
-
-        # Create input nodes.
-        for index in range(NN._num_in):
-            nodes[index] = tf.Variable(0.0, name=f"input{index}")
-
-        # Create temporary placeholders.
-        for index in range(NN._num_out):
-            nodes[NN._num_in + index] = tf.Variable(0.0, name=f"out{index}")
-
-        # Sort connections by their target.
-        connections_by_end = {}
-        for connection in self._connections:
-            prev = connections_by_end.get(connection[2]) or []
-            prev.append(connection)
-            connections_by_end[connection[2]] = prev
-
-        while connections_by_end:
-            creatable_end_nodes = {
-                index: connections
-                for index, connections in connections_by_end.items()
-                if all(start in nodes for _, start, _, _, _ in connections)
-            }
-
-            for index, connections in creatable_end_nodes.items():
-                # `connections` is all connections required for a certain end node.
-                # Filter active connections.
-                connections = [c for c in connections if c[3]]
-
-                end_node = tf.constant(0.0)
-                for _, start, _, _, weight in connections:
-                    end_node = tf.nn.sigmoid(tf.add(end_node, tf.multiply(nodes[start], weight)))
-
-                nodes[index] = end_node
-                del connections_by_end[index]
-
-        inputs = [nodes[index] for index in range(NN._num_in)]
-        outputs = [nodes[index + NN._num_in] for index in range(NN._num_out)]
-        return inputs, outputs
-
-
 class Player:
     _distance_travelled = 0
     _dead = False
 
     def __init__(self):
-        self._x = 1440 / 2
-        self._y = 900 / 2
+        self._x = 100  # 1440 / 2
+        self._y = 100  # 900 / 2
         self._color = (random_int(256), random_int(256), random_int(256), 255)
 
     @property
@@ -345,7 +185,7 @@ class RandomAI(Player):
         return (random_bool(), random_bool(), random_bool(), random_bool())
 
 
-class NNAI(Player):
+class NNAITF(Player):
     def __init__(self, nn_def, tf_session, input_var, output_var):
         Player.__init__(self)
         self._tf_session = tf_session
@@ -361,6 +201,19 @@ class NNAI(Player):
             self._input_var[3]: (900 - self.y) / 900,
         }
         result = self._tf_session.run(self._output_var, feed_dict=feed_dict)
+        return [a > 0.5 for a in result]
+
+
+class NNAI(Player):
+    def __init__(self, nn_def):
+        Player.__init__(self)
+        self.nn_def = nn_def
+        self.nn = nn_def.to_python_function()
+
+    def get_inputs(self):
+        result = self.nn(
+            [self.x / 1440, self.y / 900, (1440 - self.x) / 1440, (900 - self.y) / 900]
+        )
         return [a > 0.5 for a in result]
 
 
@@ -428,7 +281,7 @@ class Game:
                 for player in players:
                     player.render(self.screen)
                 pygame.display.flip()
-                clock.tick(60)
+                # clock.tick(60)
 
 
 def chunks(data, chunk_size):
@@ -448,45 +301,58 @@ if __name__ == "__main__":
 
     game = Game()
     print("Preparing players")
-    num_players = 100
-    players_nn = [NN.mutate(NN()) for _ in range(num_players)]
+    generation_size = 1000
+    players_nn = [NN.mutate(NN()) for _ in range(generation_size)]
 
     generation = 0
     while True:
         print(f"Generation {generation}")
         generation = generation + 1
 
-        print("Converting networks")
-        tf_networks = [(nn, nn.to_tensorflow_network()) for nn in players_nn]
+        print("Wrapping player objects")
+        players = []
+        for network_def in players_nn:
+            players.append(NNAI(network_def))
 
-        init_op = tf.global_variables_initializer()
-        with tf.Session() as sess:
-            sess.run(init_op)
+        chunk_size = 50
+        for chunk_index, chunk in enumerate(chunks(players, chunk_size)):
+            print(f"Running chunk {1 + chunk_index}/{len(players)/chunk_size:.0f}")
+            game.run(chunk)
 
-            print("Wrapping player objects")
-            players = []
-            for network_def, (inputs, outputs) in tf_networks:
-                players.append(NNAI(network_def, sess, inputs, outputs))
+        print("Sorting by score")
+        players.sort(reverse=True, key=lambda a: a.score)
+        players_nn = [player.nn_def for player in players]
 
-            chunk_size = 25
-            for chunk_index, chunk in enumerate(chunks(players, 25)):
-                print(f"Running chunk {chunk_index}/{len(players)/25:.0f}")
-                game.run(chunk)
+        print("Splitting into species")
+        speciess = []
+        for nn in players_nn:
+            categorized = False
+            for species in speciess:
+                if NN.is_same_species(nn, species[0]):
+                    species.append(nn)
+                    categorized = True
+                    break
 
-            print("Sorting by score")
-            players.sort(reverse=True, key=lambda a: a.score)
-            players_nn = [player.nn_def for player in players]
-            print("Selecting the fittest")
-            thanos = 50
-            players_nn = players_nn[0:thanos]
+            if not categorized:
+                speciess.append([nn])
+        print(f"Split population into {len(speciess)} species")
+        species_sizes = [len(s) for s in speciess]
+        print(f"Average species size: {np.mean(species_sizes)} {np.median(species_sizes)}")
 
-            print("Breeding")
-            for a in range(int(num_players / 3)):
-                i1, i2 = random_int(thanos), random_int(thanos)
-                a_i, b_i = min(i1, i2), max(i1, i2)
-                players_nn.append(NN.breed(players_nn[a_i], players_nn[b_i]))
+        print(f"Selecting the fittest {NN.thanos * 100:.2f}% from every species")
+        speciess = [species[: math.floor(NN.thanos * len(species))] for species in speciess]
 
-            print("Mutating")
-            for a in range(int(num_players / 2)):
-                i = random_int(thanos)
-                players_nn.append(NN.mutate(players_nn[i]))
+        players_nn = [a for species in speciess for a in species]
+        num_players = len(players_nn)
+
+        print("Breeding")
+        to_breed = int(0.75 * generation_size - num_players)
+        for a in range(to_breed):
+            i1, i2 = random_int(num_players), random_int(num_players)
+            a_i, b_i = min(i1, i2), max(i1, i2)
+            players_nn.append(NN.breed(players_nn[a_i], players_nn[b_i]))
+
+        print("Mutating")
+        for a in range(int(0.25 * generation_size)):
+            i = random_int(num_players)
+            players_nn.append(NN.mutate(players_nn[i]))
