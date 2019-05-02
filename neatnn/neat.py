@@ -7,24 +7,10 @@ import numpy as np
 import pygame
 import tensorflow as tf
 
-
-def random_int(max_value=10):
-    return min(int(random.random() * max_value), max_value - 1)
+from neatnn import NN, Gene
 
 
-def random_bool():
-    return random.random() > 0.5
-
-class NN:
-    # connections: [(Index, Start, End, Active, Weight)]
-    _connections = []
-
-    _num_in = None
-    _num_out = None
-
-    _next_node_index = None
-    _next_gene_index = None
-
+class NeatNN(NN)
     _delta_weights_factor = 0.0
     _delta_disjoint_factor = 1.0
     _delta_excess_factor = 1.0
@@ -80,14 +66,6 @@ class NN:
     @staticmethod
     def is_same_species(a, b):
         return NN.delta(a, b) < NN._species_delta_treshold
-
-    @staticmethod
-    def prepare(num_in, num_out):
-        NN._num_in = num_in
-        NN._num_out = num_out
-
-        NN._next_node_index = num_in + num_out
-        NN._next_gene_index = 0
 
     @staticmethod
     def breed(a, b):
@@ -195,110 +173,3 @@ class NN:
         connections = [*a._connections]
         mutation_f(connections)
         return NN(connections)
-
-    def __init__(self, connections=None):
-        self._connections = connections or []
-
-    def to_tensorflow_network(self):
-        nodes = {}
-
-        # Create input nodes.
-        for index in range(NN._num_in):
-            nodes[index] = tf.Variable(0.0, name=f"input{index}")
-
-        # Create temporary placeholders.
-        for index in range(NN._num_out):
-            nodes[NN._num_in + index] = tf.Variable(0.0, name=f"out{index}")
-
-        # Sort connections by their target.
-        connections_by_end = {}
-        for connection in self._connections:
-            prev = connections_by_end.get(connection[2]) or []
-            prev.append(connection)
-            connections_by_end[connection[2]] = prev
-
-        while connections_by_end:
-            creatable_end_nodes = {
-                index: connections
-                for index, connections in connections_by_end.items()
-                if all(start in nodes for _, start, _, _, _ in connections)
-            }
-
-            for index, connections in creatable_end_nodes.items():
-                # `connections` is all connections required for a certain end node.
-                # Filter active connections.
-                connections = [c for c in connections if c[3]]
-
-                end_node = tf.constant(0.0)
-                if connections:
-                    for _, start, _, _, weight in connections:
-                        end_node = tf.add(end_node, tf.multiply(nodes[start], weight))
-                    end_node = tf.nn.sigmoid(end_node)
-
-                nodes[index] = end_node
-                del connections_by_end[index]
-
-        inputs = [nodes[index] for index in range(NN._num_in)]
-        outputs = [nodes[index + NN._num_in] for index in range(NN._num_out)]
-        return inputs, outputs
-
-    def to_python_function(self):
-        nodes = {}
-
-        # Create input nodes.
-        def mk_input_access(index):
-            def input_access(inputs):
-                return inputs[index]
-
-            return input_access
-
-        for index in range(NN._num_in):
-            nodes[index] = mk_input_access(index)
-
-        # Create temporary placeholders.
-        for index in range(NN._num_out):
-            nodes[NN._num_in + index] = lambda _: 0.0
-
-        # Sort connections by their target.
-        connections_by_end = {}
-        for connection in self._connections:
-            prev = connections_by_end.get(connection[2]) or []
-            prev.append(connection)
-            connections_by_end[connection[2]] = prev
-
-        while connections_by_end:
-            creatable_end_nodes = {
-                index: connections
-                for index, connections in connections_by_end.items()
-                if all(start in nodes for _, start, _, _, _ in connections)
-            }
-
-            for index, connections in creatable_end_nodes.items():
-                # `connections` is all connections required for a certain end node.
-                # Filter active connections.
-                connections = [c for c in connections if c[3]]
-
-                if connections:
-
-                    def mk_sigmoid_sum_weighted_connections(connections):
-                        def sigmoid_sum_weighted_connections(inputs):
-                            summed = sum(
-                                [
-                                    nodes[start](inputs) * weight
-                                    for _, start, _, _, weight in connections
-                                ]
-                            )
-                            epower = math.e ** summed
-                            return epower / (1 + epower)
-
-                        return sigmoid_sum_weighted_connections
-
-                    nodes[index] = mk_sigmoid_sum_weighted_connections(connections)
-                else:
-                    nodes[index] = lambda _: 0.0
-
-                del connections_by_end[index]
-
-        return lambda inputs: [nodes[index + NN._num_in](inputs) for index in range(NN._num_out)]
-
-
