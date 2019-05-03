@@ -1,5 +1,6 @@
 """Base classes for implementing trivial `pygame`s."""
 import functools
+import sys
 
 import pygame
 
@@ -75,8 +76,16 @@ class Game:
             self.screen.blit(text_surface, dest=pos)
             pos = pos[0], pos[1] + height
 
-    def handle_events(self):
-        """Override this function to handle events in each game tick."""
+    def handle_event(self, event):
+        """Handle additional events."""
+        pass
+
+    def update(self, players):
+        """Override this function to update global state in each game tick."""
+        pass
+
+    def render(self, players):
+        """Override this function to render global stuff in each game tick."""
         pass
 
     def run(self, players):
@@ -85,20 +94,28 @@ class Game:
         clock = pygame.time.Clock()
 
         while self._running and not all(player.is_dead for player in players):
-            self.handle_events()
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    sys.exit()
+                elif event.type == pygame.KEYDOWN:
+                    if event.unicode == "q":
+                        sys.exit()
+                    elif event.unicode == "n":
+                        self.running = False
+                    elif event.unicode == "v":
+                        self.graphics = not self.graphics
+                self.handle_event(event)
+
             for player in players:
                 player.update()
 
             if self._graphics:
-                self.screen.fill(self.black, self.full_rect)
-                lines = [
-                    (f"{player.score:.2f} {player._last_inputs}", player.color)
-                    for player in players
-                ]
-                self.render_text(lines, (1000, 10))
+                # Render.
+                self.render(players)
                 for player in players:
                     player.render(self.screen)
                 pygame.display.flip()
 
+                # Sync time.
                 if self._fps is not None:
                     clock.tick(self._fps)

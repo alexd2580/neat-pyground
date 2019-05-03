@@ -114,7 +114,17 @@ class TestGame:
     def test_handle_events(self):
         """`handle_events` does nothing."""
         g = TestGame.Game()
-        g.handle_events()
+        g.handle_event(None)
+
+    def test_update(self):
+        """`update` does nothing."""
+        g = TestGame.Game()
+        g.update([])
+
+    def test_render(self):
+        """`render` does nothing."""
+        g = TestGame.Game()
+        g.render([])
 
     def test_run(self):
         """`run` iterates while the game is `_running` and some players are alive."""
