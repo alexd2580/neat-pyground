@@ -25,3 +25,8 @@ def chunks(data, chunk_size):
 
     if accum:
         yield accum
+
+
+def make_set(*args):
+    """Remove duplicates from the `list_like`."""
+    return make_set(*args[0]) if len(args) == 1 else list(set(args))

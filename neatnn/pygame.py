@@ -1,5 +1,6 @@
 """Base classes for implementing trivial `pygame`s."""
 import functools
+import math
 import sys
 
 import pygame
@@ -13,11 +14,11 @@ class Player:
         """Get the current player state - alive or dead."""
         raise NotImplementedError("You need to implement the `is_dead` property.")
 
-    def update(self):
+    def update(self, game):
         """Is called by the `Game.run` method every tick."""
         pass
 
-    def get_inputs(self):
+    def get_inputs(self, game):
         """Retrieve user input.
 
         Simplifies integration of AI players.
@@ -42,7 +43,7 @@ class Game:
     HEIGHT = 900
 
     _graphics = True
-    _fps = 30
+    _fps = 60
 
     @staticmethod
     def is_in_rect(x, y, rx, ry, rw, rh):
@@ -63,6 +64,10 @@ class Game:
         self.full_rect = 0, 0, self.WIDTH, self.HEIGHT
         self.screen = pygame.display.set_mode(self.window_size)
         self.black = pygame.Color(0, 0, 0, 255)
+
+    def reset(self):
+        """Override this to easily reset the game state from the main."""
+        pass
 
     def render_text(self, lines, pos):
         """Display text split by lines at position `pos`."""
@@ -101,21 +106,26 @@ class Game:
                     if event.unicode == "q":
                         sys.exit()
                     elif event.unicode == "n":
-                        self.running = False
+                        self._running = False
                     elif event.unicode == "v":
-                        self.graphics = not self.graphics
+                        self._graphics = not self._graphics
+                    elif event.unicode == "-":
+                        self._fps = max(1, self._fps - 10)
+                    elif event.unicode == "+":
+                        self._fps = min(self._fps + 10, 300)
                 self.handle_event(event)
 
             for player in players:
-                player.update()
+                player.update(self)
+
+            self.update(players)
 
             if self._graphics:
-                # Render.
+                self.screen.fill(self.black, self.full_rect)
                 self.render(players)
                 for player in players:
                     player.render(self.screen)
                 pygame.display.flip()
 
-                # Sync time.
-                if self._fps is not None:
+                if self._fps is not None and self._fps < 300:
                     clock.tick(self._fps)

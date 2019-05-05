@@ -1,36 +1,25 @@
-import functools
-import math
-import random
-import sys
+"""Main interleaved game/evolution routine."""
+import logging
 
-import numpy as np
-import pygame
-import tensorflow as tf
-
-from neatnn.neat import NeatNN
-from neatnn.dont_stop_game import NNAI, DontStop
-
+from neatnn.circular_movement import NNAI, CircularMovement
+# from neatnn.dont_stop_game import NNAI, DontStop
+from neatnn.neat import NeatNN, Population
 from neatnn.utils import chunks
 
-NeatNN.prepare(4, 4)
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-game = DontStop()
-print("Preparing players")
-generation_size = 1000
-players_nn = [NeatNN.mutate(NeatNN()) for _ in range(generation_size)]
+NeatNN.setup(2, 4)
+game = CircularMovement()
+# game = DontStop()
+population = Population(500)
+chunk_size = 50
 
-generation = 0
 while True:
-    print(f"Generation {generation}")
-    generation = generation + 1
-
-    print("Wrapping player objects")
-    players = []
-    for network_def in players_nn:
-        players.append(NNAI(network_def))
-
-    chunk_size = 50
-    for chunk_index, chunk in enumerate(chunks(players, chunk_size)):
-        print(f"Running chunk {1 + chunk_index}/{len(players)/chunk_size:.0f}")
+    players = [NNAI(nn) for nn in population.everybody()]
+    for chunk in chunks(players, chunk_size):
+        # logger.info(f"Running chunk {1 + chunk_index}/{len(players)/chunk_size:.0f}")
+        game.reset()
         game.run(chunk)
 
+    population.next_generation()

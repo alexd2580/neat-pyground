@@ -1,32 +1,47 @@
-import functools
+"""Implementation of NeuroEvolution of Augmented Topologies."""
+
+import logging
 import math
 import random
-import sys
 
 import numpy as np
-import pygame
-import tensorflow as tf
+from neatnn.nn import NN, Gene
+from neatnn.utils import make_set, randbool
 
-from neatnn import NN, Gene
-from neatnn.utils import randbool
+logger = logging.getLogger(__name__)
 
 
 class NeatNN(NN):
+    """Neural network class with methods for running NEAT."""
+
     _DELTA_WEIGHTS_FACTOR = 0.4
     _DELTA_DISJOINT_FACTOR = 2.0
     _DELTA_TRESHOLD = 1.0
 
     _CREATE_LINK_CHANCE = 2.0
-    _SPLIT_LINK_CHANCE = 0.50
+    _SPLIT_LINK_CHANCE = 0.5
+    _MUTATE_LINKS_CHANCE = 0.25
+    _MUTATE_LINK_PERTURB_CHANCE = 0.9
     _DISABLE_LINK_CHANCE = 0.4
     _ENABLE_LINK_CHANCE = 0.2
 
-    def __init__(self, links=None):
-        super(NN, links=links)
-        self._mutations = [
-            ("create_link", NeatNN._CREATE_LINK_CHANCE),
-            ("split_link", NeatNN._SPLIT_LINK_CHANCE),
-        ]
+    def __init__(self, links=None, clone=None):
+        """Create a new neat-backed NN."""
+        if links is not None and clone:
+            raise Exception("Can't specify both `links` and `clone`.")
+
+        if clone:
+            super().__init__(links=clone._links)
+            self._mutations = list(clone._mutations)
+        else:
+            super().__init__(links=links if links is not None else [])
+            self._mutations = [
+                ("create_link", NeatNN._CREATE_LINK_CHANCE),
+                ("split_link", NeatNN._SPLIT_LINK_CHANCE),
+                ("mutate_links", NeatNN._MUTATE_LINKS_CHANCE),
+                ("disable_link", NeatNN._DISABLE_LINK_CHANCE),
+                ("enable_link", NeatNN._ENABLE_LINK_CHANCE),
+            ]
 
     @staticmethod
     def align_genes(a, b):
@@ -36,52 +51,55 @@ class NeatNN(NN):
 
         a, b = next(a_iter, None), next(b_iter, None)
         while a or b:
-            if a and b and a[0] == b[0]:
+            if a and b and a.index == b.index:
                 yield (a, b)
                 a, b = next(a_iter, None), next(b_iter, None)
-            elif b and (not a or a[0] > b[0]):
+            elif b and (not a or a.index > b.index):
                 yield (None, b)
                 b = next(b_iter, None)
-            elif a and (not b or a[0] < b[0]):
+            elif a and (not b or a.index < b.index):
                 yield (a, None)
                 a = next(a_iter, None)
 
     @staticmethod
-    def delta(a, b):
+    def delta(individual_a, individual_b):
         """Compute the delta between two genomes."""
         num_matching = 0
         matching_weight_delta = 0.0
         num_disjoint = 0
 
-        aligned_genes = NN.align_genes(a, b)
+        aligned_genes = NeatNN.align_genes(individual_a, individual_b)
         a, b = next(aligned_genes, (None, None))
         while a and b:
             num_matching = num_matching + 1
-            matching_weight_delta = matching_weight_delta + math.fabs(a[4] - b[4])
+            matching_weight_delta = matching_weight_delta + math.fabs(a.weight - b.weight)
             a, b = next(aligned_genes, (None, None))
 
         while a or b:
             num_disjoint = num_disjoint + 1
             a, b = next(aligned_genes, (None, None))
 
-        max_total = max(len(a._links), len(b._links))
+        max_total = max(len(individual_a._links), len(individual_b._links))
 
-        return (
-            (matching_weight_delta / num_matching) * NeatNN._DELTA_WEIGHTS_FACTOR
-            + (num_disjoint / max_total) * NeatNN._DELTA_DISJOINT_FACTOR
-        )
+        weight_delta = matching_weight_delta / num_matching if num_matching else 0
+        weight_delta = weight_delta * NeatNN._DELTA_WEIGHTS_FACTOR
+        disjoint_delta = num_disjoint / max_total * NeatNN._DELTA_DISJOINT_FACTOR
+        return weight_delta + disjoint_delta
+
+    def belongs_to(self, species):
+        """Check if `self` belongs to `species`."""
+        return NeatNN.delta(self, species.representative) < NeatNN._DELTA_TRESHOLD
+
+    def set_score(self, score):
+        """Store the score."""
+        self._score = score
 
     @staticmethod
-    def is_same_species(a, b):
-        """Check if both organisms belong to the same species."""
-        return NeatNN.delta(a, b) < NN._DELTA_TRESHOLD
-
-    @staticmethod
-    def breed(a, b):
-        """Breed two organisms."""
+    def crossover(a, b):
+        """Breed two individuals."""
         new_links = []
 
-        aligned_genes = NN.align_genes(a, b)
+        aligned_genes = NeatNN.align_genes(a, b)
         a, b = next(aligned_genes, (None, None))
         while a and b:
             new_links.append(a if randbool() else b)
@@ -98,106 +116,95 @@ class NeatNN(NN):
             had_a = bool(a)
             a, b = next(aligned_genes, (None, None))
 
-        return NN(links=new_links)
+        return NeatNN(links=new_links)
 
-    @staticmethod
-    def create_link(links):
-        start_nodes = list(set([*[start for _, start, _, _, _ in links], *range(NN._num_in)]))
-        end_nodes = list(
-            set(
-                [
-                    *[end for _, _, end, _, _ in links],
-                    *[index + NN._num_in for index in range(NN._num_out)],
-                ]
-            )
-        )
+    def create_link(self):
+        """Join two nodes with a link."""
+        start_nodes = range(NN._num_inputs)
+        start_nodes = make_set(*[gene.start for gene in self._links], *start_nodes)
+        end_nodes = [index + NN._num_inputs for index in range(NN._num_outputs)]
+        end_nodes = make_set(*[gene.end for gene in self._links], *end_nodes)
 
-        gene_index = NN._next_gene_index
-        NN._next_gene_index = NN._next_gene_index + 1
-        weight = random.random() * 4 - 2
+        start_node = random.choice(start_nodes)
+        end_node = random.choice(end_nodes)
 
-        # Repeat until not cyclic.
-        def is_parent_of(a, b):
-            if a == b:
-                return True
-            return any([is_parent_of(end, b) for _, start, end, _, _ in links if start == a])
+        if any(link.start == start_node and link.end == end_node for link in self._links):
+            logger.debug(f"Skipping mutation, link between {start_node} and {end_node} exists.")
+            return
 
-        start_node, end_node = 0, 0
-        while is_parent_of(end_node, start_node):
-            start_node = start_nodes[random_int(len(start_nodes))]
-            end_node = end_nodes[random_int(len(end_nodes))]
+        # Check globally or locally? Use global ID if link exists globally?
+        # if Gene.exists(start_node, end_node):
 
-        links.append((gene_index, start_node, end_node, True, weight))
+        self._links.append(Gene(start_node, end_node, True))
 
-    @staticmethod
-    def split_link(links):
-        random_link_index = randint(0, len(links) - 1)
-        index, start, end, _, weight = links[random_link_index]
-        links[random_link_index] = (index, start, end, False, weight)
+    def split_link(self):
+        """Split a link and create a node in between."""
+        assert self._links
+        link = random.choice(self._links)
+        if not link.active:
+            return
 
-        gene_index = NN._next_gene_index
-        NN._next_gene_index = NN._next_gene_index + 2
-
+        link.toggle()
         node_index = NN._next_node_index
-        NN._next_node_index = NN._next_node_index + 1
-
-        links.extend(
+        self._links.extend(
             [
-                (gene_index, start, node_index, True, 1.0),
-                (gene_index + 1, node_index, end, True, weight),
+                Gene(link.start, node_index, True, weight=1.0),
+                Gene(node_index, link.end, True, weight=link.weight),
             ]
         )
-        return links
 
-    @staticmethod
-    def shift_link(links):
-        if len(links) == 0:
-            return NN.add_link(links)
-        random_link_index = random_int(len(links))
-        index, start, end, active, weight = links[random_link_index]
-        links[random_link_index] = (
-            index,
-            start,
-            end,
-            active,
-            weight * random.random() * 4 - 2,
-        )
-        return links
+    def mutate_links(self):
+        """Mutate the weights on all links."""
+        for link in self._links:
+            if random.random() < NeatNN._MUTATE_LINK_PERTURB_CHANCE:
+                link.randomize_weight()
+            else:
+                link.shift_weight()
 
-    @staticmethod
-    def randomize(links):
-        if len(links) == 0:
-            return NN.add_link(links)
-        random_link_index = random_int(len(links))
-        index, start, end, active, weight = links[random_link_index]
-        links[random_link_index] = (index, start, end, active, random.random() * 4 - 2)
-        return links
+    def disable_link(self):
+        """Disable an enabled link."""
+        candidates = [link for link in self._links if link.active]
+        if candidates:
+            random.choice(candidates).toggle()
+
+    def enable_link(self):
+        """Enable a disabled link."""
+        candidates = [link for link in self._links if not link.active]
+        if candidates:
+            random.choice(candidates).toggle()
 
     def mutate(self):
         """Create a new individual by mutating an existing one."""
         # randomly increase or decrease the chance of all mutations respectively by 5%
         # Max one "link" mutation
-        new_links = list(self._links)
-        for mutation, chance in self._mutations:
+        logger.debug(f"Mutating {self}")
+        clone = NeatNN(clone=self)
+        for mutation, chance in clone._mutations:
             if random.random() < chance:
-                new_links = getattr(NeatNN, mutation)(new_links)
+                logger.debug(f"Applying {mutation} mutation with a chance of {chance:.2f}")
+                getattr(clone, mutation)()
 
-        return NeatNN(links=new_links)
+        return clone
 
 
-class Species():
+class Species:
     """Groups individuals with similar behavior."""
 
-    self._MAX_STALENESS = 15
-    self._CROSSOVER_CHANCE = 0.75
+    _species_stats = {}
+    _next_species_index = 0
+
+    _MAX_STALENESS = 15
+    _CROSSOVER_CHANCE = 0.75
 
     def __init__(self, adam):
         """Create a new species with `adam` as it's founder."""
-        self._is_sorted_by_score = False
         self._individuals = [adam]
 
         self._max_score = 0
         self._staleness = 0
+
+        self._index = self._next_species_index
+        Species._next_species_index = Species._next_species_index + 1
 
     @property
     def representative(self):
@@ -215,33 +222,29 @@ class Species():
     def add(self, individual):
         """Add `individual` to this species.
 
-        Does not check whether the individual really belongs to this species."""
+        Does not check whether the individual really belongs to this species.
+        """
         self._individuals.append(individual)
-        self._is_sorted_by_score = False
 
-    def sort_species_by_score(self):
+    def sort_by_score(self):
         """Orders the individuals of this species by score."""
-        if not self._is_sorted_by_score:
-            self._individuals.sort(reverse=True, key=lambda a: a.score)
-            self._is_sorted_by_score = True
+        self._individuals.sort(reverse=True, key=lambda a: a._score)
 
     def opinionated_thanos(self):
-        """Kill the worst performing 50% of organisms."""
-        self.sort_species_by_score()
+        """Kill the latter 50% of organisms."""
         # Keep at least one organism in each species.
-        self._individuals = self._individuals[:math.ceil(len(organisms) / 2)]
+        self._individuals = self._individuals[: math.ceil(len(self._individuals) / 2)]
 
     def sudden_death(self):
-        """Kill everyone except the best one."""
-        self.sort_species_by_score()
+        """Kill everyone except the first."""
         self._individuals = [self._individuals[0]]
 
     def update_staleness(self):
-        """Checks whether this species' performance has improved.
+        """Check whether this species' performance has improved.
 
         If the max score did not increase since the last check, increase the staleness counter.
         """
-        current_max = max([i.score for i in self._individuals])
+        current_max = self._individuals[0]._score
         if current_max > self._max_score:
             self._max_score = current_max
             self._staleness = 0
@@ -256,22 +259,31 @@ class Species():
     def breed_child(self):
         """Create a new child from the ones in this species."""
         if random.random() < Species._CROSSOVER_CHANCE:
-            return NeatNN.breed(random.choice(self._individuals), random.choice(self._individuals))
+            return NeatNN.crossover(
+                random.choice(self._individuals), random.choice(self._individuals)
+            )
         else:
             return random.choice(self._individuals).mutate()
 
 
-class Population():
+class Population:
     """Groups actions on populations."""
 
     def __init__(self, population=300):
         """Create a new population of size `population`."""
         self._population = population
+        self._generation = 0
         self._species = []
         for _ in range(self._population):
             new_organism = NeatNN()
             new_organism = new_organism.mutate()
             self.add_to_respective_species(new_organism)
+
+    def everybody(self):
+        """Iterate through every individual."""
+        for species in self._species:
+            for individual in species._individuals:
+                yield individual
 
     def add_to_respective_species(self, individual):
         """Add `individual` to his respective species."""
@@ -283,8 +295,8 @@ class Population():
 
     def assign_average_global_rank(self):
         """Assign the global position from the back to each individual."""
-        everybody = [individual for species in self._species for individual in species._individuals]
-        everybody.sort(key=lambda i: i.score)
+        everybody = list(self.everybody())
+        everybody.sort(key=lambda i: i._score)
         for index, individual in enumerate(everybody):
             # Rank is one-based to simplify future calculations.
             individual.global_rank = index + 1
@@ -294,24 +306,62 @@ class Population():
 
     def next_generation(self):
         """Create next generation."""
-        # Remove bottom ceil 50% of each species.
+        self._generation = self._generation + 1
+
+        logger.info(f"Generation {self._generation}")
+
         for species in self._species:
-            species.opinionated_thanos()
+            species.sort_by_score()
             species.update_staleness()
 
         self._species.sort(reverse=True, key=lambda s: s.max_score)
+
+        n = min(5, len(self._species))
+        logger.info(f"Best performing {n} species:")
+        for index in range(n):
+            species = self._species[index]
+            rank = f"\t#{index + 1}\t{species._index}:"
+            size = f"\tSize = {len(species._individuals)}"
+            max_score = f"\tMax score = {species.max_score}"
+            staleness = f"\tStaleness = {species._staleness}{' RIP' if species.is_stale else ''}"
+            logger.info(f"{rank}{size}{max_score}{staleness}")
+
+        for species in self._species:
+            species.opinionated_thanos()
+
         self._species = [s for rank, s in enumerate(self._species) if not s.is_stale or rank == 0]
 
         # Calculate average (adjusted?) fitness of each species.
         self.assign_average_global_rank()
 
+        n = min(5, len(self._species))
+        logger.info(f"Best performing {n} species after selection purge:")
+        for index in range(n):
+            species = self._species[index]
+            rank = f"\t#{index + 1}\t{species._index}:"
+            size = f"\tSize = {len(species._individuals)}"
+            max_score = f"\tMax score = {species.max_score}"
+            average_global_rank = f"\tAverage global rank = {species.average_global_rank:.1f} [{' '.join(f'{i._score:n}' for i in species._individuals[:10])}]"
+            logger.info(f"{rank}{size}{max_score}{average_global_rank}")
+
         # If this species will produce no children, then drop it.
         total_average_global_rank = sum([s.average_global_rank for s in self._species])
         children_per_rank = self._population / total_average_global_rank
         self._species = [
-            species for species in self._species
-            if species.average_glbal_rank * children_per_rank >= 1
+            species
+            for species in self._species
+            if (species.average_global_rank * children_per_rank) >= 1
         ]
+
+        n = min(5, len(self._species))
+        logger.info(f"Best performing {n} species after reproduction purge:")
+        for index in range(n):
+            species = self._species[index]
+            rank = f"\t#{index + 1}\t{species._index}:"
+            size = f"\tSize = {len(species._individuals)}"
+            max_score = f"\tMax score = {species.max_score}"
+            average_global_rank = f"\tAverage global rank = {species.average_global_rank:.1f}"
+            logger.info(f"{rank}{max_score}{average_global_rank}")
 
         # Breed children.
         total_average_global_rank = sum([s.average_global_rank for s in self._species])
@@ -319,11 +369,19 @@ class Population():
         children = []
         for species in self._species:
             # One child is the top-scorer from the previous generation.
-            num_children = math.floor(species.average_glbal_rank * children_per_rank) - 1
+            num_children = math.floor(species.average_global_rank * children_per_rank) - 1
             children.extend([species.breed_child() for _ in range(num_children)])
 
         for species in self._species:
             species.sudden_death()
+
+        n = min(5, len(self._species))
+        logger.info(f"Best performing {n} species after sudden death:")
+        for index in range(n):
+            species = self._species[index]
+            rank = f"\t#{index + 1}\t{species._index}:"
+            score = f"\tScore = {species._individuals[0]._score:n}"
+            logger.info(f"{rank}{score}")
 
         num_missing = self._population - len(self._species) - len(children)
         for _ in range(num_missing):
@@ -331,16 +389,3 @@ class Population():
 
         for child in children:
             self.add_to_respective_species(child)
-
-
-
-
-
-
-MutateConnectionsChance = 0.25
-linkMutate
-    PerturbChance = 0.90
-    StepSize = 0.1
-  # For each node
-  # with a chance of `perturbChance` add random in range [-step, +step] to weight
-  # otherwise assign a random value to connection [-2, 2]

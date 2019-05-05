@@ -1,36 +1,65 @@
 """Simple neural network structure classes."""
 
+import logging
 import math
 import random
 
 import tensorflow as tf
+
+logger = logging.getLogger(__name__)
 
 
 class Gene:
     """Represents a single connection in a neural network."""
 
     _next_gene_index = 0
+    _genes = []
+
+    _MAX_PERTURB_STEP = 0.1
 
     @staticmethod
     def next_gene_index():
+        """Sequentially increasing integer."""
         index = Gene._next_gene_index
         Gene._next_gene_index = Gene._next_gene_index + 1
         return index
 
-    def __init__(self, start, end, weight, active, index=None):
-        self.index = index if index else Gene.next_gene_index()
+    def __init__(self, start, end, active, weight=None, index=None):
+        """Create a new `Gene` and add it to the global registry."""
+        self.index = index if index is not None else Gene.next_gene_index()
         self.start = start
         self.end = end
-        self.weight = weight
+        self.weight = weight if weight is not None else random.random() * 4 - 2
         self.active = active
 
+        if index is None:
+            Gene._genes.append(self)
+
+    def clone(self):
+        """Create a copy of this gene."""
+        return Gene(self.start, self.end, self.active, weight=self.weight, index=self.index)
+
+    def __repr__(self):
+        """Generate string representation."""
+        link = f"{self.start}-{self.end}"
+        active = "on" if self.active else "off"
+        return f"Gene({self.index}: {link}, {self.weight:.2f}, {active})"
+
+    @staticmethod
+    def exists(start, end):
+        """Check whether a link between `start` and `end` already exists."""
+        return any(gene.start == start and gene.end == end for gene in Gene._genes)
+
     def toggle(self):
+        """Flip the `active` flag."""
         self.active = not self.active
 
     def shift_weight(self):
-        self.weight = self.weight * random.random() * 2
+        """Shift the weight by a random value."""
+        self.weight = self.weight + (random.random() - 0.5) * 2 * Gene._MAX_PERTURB_STEP
 
     def randomize_weight(self):
+        """Set the weight to a random value."""
         self.weight = random.uniform(-2, 2)
 
 
@@ -57,7 +86,7 @@ class NN:
         NN._next_node_index = num_in + num_out
 
     def __init__(self, links=None):
-        self._links = links or []
+        self._links = [link.clone() for link in (links or [])]
 
     def to_tensorflow_network(self):
         nodes = {}
@@ -102,69 +131,49 @@ class NN:
         outputs = [nodes[index + NN._num_inputs] for index in range(NN._num_outputs)]
         return inputs, outputs
 
-    def to_python_function(self):
+
+class RecurrentEvaluator:
+    """A recurrent evaluator."""
+
+    def __init__(self, nn):
         """Generate a pure python evaluator of the network."""
-        # Incrementally generate expressions for computing the output nodes.
-        nodes = {}
+        self._inputs = {}
+        self._links = {}
+        self._outputs = {}
 
-        def default_zero(inputs):
-            """Default evaluator, which is used as a placeholder."""
-            return 0.0
+        self._num_inputs = nn._num_inputs
+        self._num_outputs = nn._num_outputs
 
-        def mk_input_access(index):
-            """Input node accessor."""
+        # Initialize output values.
+        for index in range(nn._num_outputs):
+            self._inputs[nn._num_inputs + index] = 0.0
+            self._outputs[nn._num_inputs + index] = 0.0
 
-            def input_access(inputs):
-                return inputs[index]
-
-            return input_access
-
-        def mk_sigmoid_sum_weighted(links):
-            """Compute a weighted sum of the given `links`.
-
-            Uses a sigmoid activation function.
-            """
-            input_nodes = [(nodes[link.start], link.weight) for link in links]
-
-            def sigmoid_sum_weighted(inputs):
-                summed = sum([node(inputs) * weight for node, weight in input_nodes])
-                epower = math.e ** summed
-                return epower / (1 + epower)
-
-            return sigmoid_sum_weighted
-
-        # Create input nodes.
-        for index in range(NN._num_inputs):
-            nodes[index] = mk_input_access(index)
-
-        # Create temporary output placeholders (In case noone uses those).
-        for index in range(NN._num_outputs):
-            nodes[NN._num_inputs + index] = default_zero
+        # Initialize node values.
+        for gene in nn._links:
+            self._inputs[gene.start] = 0.0
+            self._outputs[gene.start] = 0.0
 
         # Sort links by their target.
-        # links_by_end :: Map End [Gene]
-        links_by_end = {}
-        for link in self._links:
-            prev = links_by_end.get(link.end) or []
-            prev.append(link)
-            links_by_end[link.end] = prev
+        # self._links :: Map End [Gene]
+        for link in nn._links:
+            if link.active:
+                prev = self._links.get(link.end) or []
+                prev.append(link)
+                self._links[link.end] = prev
 
-        # Read link definitions from this dict and insert them into nodes.
-        # Terminate when all links have been created.
-        while links_by_end:
-            creatable_end_nodes = {
-                index: links
-                for index, links in links_by_end.items()
-                if all(link.start in nodes for link in links)
-            }
+    def __call__(self, inputs):
+        """Evaluate the network."""
+        # Swap the buffers.
+        self._inputs, self._outputs = self._outputs, self._inputs
 
-            for index, links in creatable_end_nodes.items():
-                # `links` is all links required for a certain end node.
-                # Filter active links.
-                links = [c for c in links if c.active]
-                nodes[index] = mk_sigmoid_sum_weighted(links) if links else default_zero
-                del links_by_end[index]
+        # Copy inputs over.
+        for i in range(self._num_inputs):
+            self._inputs[i] = inputs[i]
 
-        # Gather the outputs.
-        output_nodes = [nodes[index + NN._num_inputs] for index in range(NN._num_outputs)]
-        return lambda inputs: [node(inputs) for node in output_nodes]
+        for end, genes in self._links.items():
+            weighted = [self._inputs[gene.start] * gene.weight for gene in genes]
+            epower = math.e ** sum(weighted)
+            self._outputs[end] = epower / (1 + epower)
+
+        return (self._outputs[self._num_inputs + i] for i in range(self._num_outputs))

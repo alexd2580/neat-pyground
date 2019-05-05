@@ -5,24 +5,19 @@ from random import randint
 import neatnn.pygame as base
 import pygame
 from neatnn.nn import RecurrentEvaluator
-from neatnn.utils import randbool
 
 
 class Player(base.Player):
     """Base class for the "Don't Stop" game."""
 
-    _rect_size = 100
-    _max_ticks_in_rect = 50
-
     def __init__(self):
         """Initialize a player at `(100, 100)`."""
-        self._x = self._lx = 200  # 1440 / 2
-        self._y = self._ly = 200  # 900 / 2
+        self._x = 720  # 1440 / 2
+        self._y = 450  # 900 / 2
         self._color = (randint(0, 255), randint(0, 255), randint(0, 255), 255)
 
-        self._distance_travelled = 0
+        self._ticks_alive = 0
         self._dead = False
-        self._ticks_in_rect = 0
 
     @property
     def is_dead(self):  # noqa: D102
@@ -38,7 +33,7 @@ class Player(base.Player):
 
     @property
     def score(self):  # noqa: D102
-        return self._distance_travelled
+        return self._ticks_alive
 
     @property
     def color(self):  # noqa: D102
@@ -56,32 +51,15 @@ class Player(base.Player):
 
         if dist > 0:
             speed = 5
-            dx = dx * speed / dist
-            dy = dy * speed / dist
+            self._x = self._x + dx * speed / dist
+            self._y = self._y + dy * speed / dist
 
-            self._distance_travelled = self._distance_travelled + speed
-            self._x = self._x + dx
-            self._y = self._y + dy
+        dist_2 = (self._x - game.circle_x) ** 2 + (self._y - game.circle_y) ** 2
+        if dist_2 > CircularMovement.RADIUS_2:
+            self._dead = True
+            return
 
-            if not base.Game.is_on_screen(self._x, self._y):
-                self._dead = True
-
-        # Die if not moving around.
-        if not base.Game.is_in_rect(
-            self._x,
-            self._y,
-            self._lx - self._rect_size / 2,
-            self._ly - self._rect_size / 2,
-            self._rect_size,
-            self._rect_size,
-        ):
-            self._lx = self._x
-            self._ly = self._y
-            self._ticks_in_rect = 0
-        else:
-            self._ticks_in_rect = self._ticks_in_rect + 1
-            if self._ticks_in_rect > self._max_ticks_in_rect:
-                self._dead = True
+        self._ticks_alive = self._ticks_alive + 1
 
     def render(self, surface):  # noqa: D102
         pygame.draw.circle(
@@ -93,14 +71,6 @@ class Player(base.Player):
         )
 
 
-class Human(Player):
-    """A human-controlled player."""
-
-    def get_inputs(self, game):  # noqa: D102
-        pressed = pygame.key.get_pressed()
-        return (pressed[pygame.K_w], pressed[pygame.K_a], pressed[pygame.K_s], pressed[pygame.K_d])
-
-
 class NNAI(Player):
     """Pure python NN AI-controlled player."""
 
@@ -110,7 +80,7 @@ class NNAI(Player):
         self._nn = RecurrentEvaluator(nn_def)
 
     def get_inputs(self, game):  # noqa: D102
-        result = self._nn([(720 - self.x) / 100, (450 - self.y) / 100])
+        result = self._nn([(game.circle_x - self.x) / 100, (game.circle_y - self.y) / 100])
         return [a > 0.5 for a in result]
 
     def update(self, game):
@@ -119,11 +89,36 @@ class NNAI(Player):
         self.nn_def.set_score(self.score)
 
 
-class DontStop(base.Game):
+class CircularMovement(base.Game):
     """A trivial game where you die when you stop moving."""
+
+    RADIUS = 100
+    RADIUS_2 = 100 ** 2
+
+    def __init__(self):
+        """Initialize the game and stuff."""
+        super().__init__()
+        self.reset()
+
+    def reset(self):
+        """Reset the circle position."""
+        self.circle_x = 720
+        self.circle_y = 450
+        self._tick = 0
+
+    def update(self, players):
+        """Check if players are in circle and move circle."""
+        self.circle_x = 720 + 500 * math.sin(self._tick / 240)
+        self.circle_y = 450 + 300 * math.sin(self._tick / 60)
+
+        self._tick = self._tick + 1
 
     def render(self, players):
         """Render the player's score in the top-right corner."""
+        color = (50, 50, 50, 255)
+        pos = (int(self.circle_x), int(self.circle_y))
+        pygame.draw.circle(self.screen, color, pos, self.RADIUS)
+
         lines = [
             (f"{player.score:.2f} {player._last_inputs}", player.color)
             for player in players
