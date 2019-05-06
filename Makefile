@@ -23,3 +23,7 @@ test:
 .PHONY: lint
 lint:
 	venv/bin/flake8
+
+.PHONY: run
+run:
+	venv/bin/python main.py
