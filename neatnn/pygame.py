@@ -1,6 +1,5 @@
 """Base classes for implementing trivial `pygame`s."""
 import functools
-import math
 import sys
 
 import pygame
@@ -39,7 +38,7 @@ class Game:
     Wraps basic game routines and provides an overridable interface.
     """
 
-    WIDTH = 1440
+    WIDTH = 1000
     HEIGHT = 900
 
     _graphics = True

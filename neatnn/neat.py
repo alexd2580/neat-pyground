@@ -193,8 +193,8 @@ class Species:
     _species_stats = {}
     _next_species_index = 0
 
-    _MAX_STALENESS = 15
-    _CROSSOVER_CHANCE = 0.75
+    _MAX_STALENESS = 20
+    _CROSSOVER_CHANCE = 0.50
 
     def __init__(self, adam):
         """Create a new species with `adam` as it's founder."""

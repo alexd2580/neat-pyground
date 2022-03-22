@@ -80,7 +80,9 @@ class NNAI(Player):
         self._nn = RecurrentEvaluator(nn_def)
 
     def get_inputs(self, game):  # noqa: D102
-        result = self._nn([(game.circle_x - self.x) / 100, (game.circle_y - self.y) / 100])
+        result = self._nn(
+            [game.circle_x / 1440, self.x / 1440, game.circle_x / 1440, (self.x - game.circle_y) / 900, self.y / 900]
+        )
         return [a > 0.5 for a in result]
 
     def update(self, game):
@@ -92,8 +94,8 @@ class NNAI(Player):
 class CircularMovement(base.Game):
     """A trivial game where you die when you stop moving."""
 
-    RADIUS = 100
-    RADIUS_2 = 100 ** 2
+    RADIUS = 25
+    RADIUS_2 = 25 ** 2
 
     def __init__(self):
         """Initialize the game and stuff."""
@@ -108,8 +110,8 @@ class CircularMovement(base.Game):
 
     def update(self, players):
         """Check if players are in circle and move circle."""
-        self.circle_x = 720 + 500 * math.sin(self._tick / 240)
-        self.circle_y = 450 + 300 * math.sin(self._tick / 60)
+        self.circle_x = 720 + (10 + self._tick / 1000) * 500 * math.sin(self._tick / 480)
+        self.circle_y = 450 + (10 + self._tick / 1000) * 300 * math.sin(self._tick / 120)
 
         self._tick = self._tick + 1
 

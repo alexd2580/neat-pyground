@@ -80,10 +80,10 @@ class NN:
 
     @staticmethod
     def setup(num_in, num_out):
-        NN._num_inputs = num_in
+        NN._num_inputs = num_in + 1
         NN._num_outputs = num_out
 
-        NN._next_node_index = num_in + num_out
+        NN._next_node_index = NN._num_inputs + NN._num_outputs
 
     def __init__(self, links=None):
         self._links = [link.clone() for link in (links or [])]
@@ -168,12 +168,15 @@ class RecurrentEvaluator:
         self._inputs, self._outputs = self._outputs, self._inputs
 
         # Copy inputs over.
-        for i in range(self._num_inputs):
+        for i in range(self._num_inputs - 1):
             self._inputs[i] = inputs[i]
+
+        # Global BIAS input node.
+        self._inputs[self._num_inputs - 1] = 1.0
 
         for end, genes in self._links.items():
             weighted = [self._inputs[gene.start] * gene.weight for gene in genes]
-            epower = math.e ** sum(weighted)
+            epower = math.e ** (5 * sum(weighted))
             self._outputs[end] = epower / (1 + epower)
 
         return (self._outputs[self._num_inputs + i] for i in range(self._num_outputs))
