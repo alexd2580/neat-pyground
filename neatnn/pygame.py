@@ -43,6 +43,7 @@ class Game:
     HEIGHT = 900
 
     _graphics = True
+    _text = True
     _fps = 60
 
     @staticmethod
@@ -71,6 +72,9 @@ class Game:
 
     def render_text(self, lines, pos):
         """Display text split by lines at position `pos`."""
+        if not self._text:
+            return
+
         lines = [(text, color, self.font.size(text)) for text, color in lines]
         text_width, text_height = functools.reduce(
             lambda total, line: (max(total[0], line[2][0]), total[1] + line[2][1]), lines, (0, 0)
@@ -105,6 +109,8 @@ class Game:
                 elif event.type == pygame.KEYDOWN:
                     if event.unicode == "q":
                         sys.exit()
+                    elif event.unicode == "t":
+                        self._text = not self._text
                     elif event.unicode == "n":
                         self._running = False
                     elif event.unicode == "v":

@@ -1,6 +1,6 @@
 """Don't stop game."""
 import math
-from random import randint
+from random import randint, choice
 
 import neatnn.pygame as base
 import pygame
@@ -105,11 +105,13 @@ class CircularMovement(base.Game):
         self.circle_x = 720
         self.circle_y = 450
         self._tick = 0
+        self._period_x = choice([-1, 1]) * randint(1, 300)
+        self._period_y = choice([-1, 1]) * randint(1, 300)
 
     def update(self, players):
         """Check if players are in circle and move circle."""
-        self.circle_x = 720 + 500 * math.sin(self._tick / 240)
-        self.circle_y = 450 + 300 * math.sin(self._tick / 60)
+        self.circle_x = 720 + 500 * math.sin(self._tick / self._period_x)
+        self.circle_y = 450 + 300 * math.sin(self._tick / self._period_y)
 
         self._tick = self._tick + 1
 

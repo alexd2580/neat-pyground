@@ -16,8 +16,8 @@ class Player(base.Player):
 
     def __init__(self):
         """Initialize a player at `(100, 100)`."""
-        self._x = self._lx = 200  # 1440 / 2
-        self._y = self._ly = 200  # 900 / 2
+        self._x = self._lx = randint(50, 1390)
+        self._y = self._ly = randint(50, 850)
         self._color = (randint(0, 255), randint(0, 255), randint(0, 255), 255)
 
         self._distance_travelled = 0
@@ -65,6 +65,10 @@ class Player(base.Player):
 
             if not base.Game.is_on_screen(self._x, self._y):
                 self._dead = True
+
+        # Die if > 100.000
+        if self._distance_travelled > 100000:
+            self._dead = True
 
         # Die if not moving around.
         if not base.Game.is_in_rect(

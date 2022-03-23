@@ -245,7 +245,7 @@ class Species:
         If the max score did not increase since the last check, increase the staleness counter.
         """
         current_max = self._individuals[0]._score
-        if current_max > self._max_score:
+        if current_max > self._max_score or current_max > 100000:
             self._max_score = current_max
             self._staleness = 0
         else:
